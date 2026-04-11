@@ -1,0 +1,14 @@
+# Large data files — download instructions in README.md
+data/raw/*.csv
+data/processed/*.csv
+
+# R session artifacts
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# OS files
+.DS_Store
+desktop.ini
+Thumbs.db

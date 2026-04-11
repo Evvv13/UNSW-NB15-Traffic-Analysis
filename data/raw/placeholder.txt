@@ -1,0 +1,9 @@
+This folder stores the raw UNSW-NB15 dataset.
+
+Due to file size constraints, the dataset is NOT included in this repository.
+
+To get started:
+1. Download the dataset from the official source:
+   https://research.unsw.edu.au/projects/unsw-nb15-dataset
+2. Place the file named 'UNSW-NB15_uncleaned.csv' in this directory.
+3. Run scripts/analysis_main.R to reproduce all results.
