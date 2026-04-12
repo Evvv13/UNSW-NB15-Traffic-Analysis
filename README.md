@@ -9,14 +9,14 @@ A reproducible R-based pipeline for detecting network intrusions using the UNSW-
 ```
 UNSW-NB15-Traffic-Analysis/
 ├── data/
-│   ├── raw/                  # Place the downloaded dataset here (see Usage)
-│   └── processed/            # UNSW_cleaned.csv is generated here by the script
+│   ├── raw/                   # Place the downloaded dataset here (see Usage)
+│   └── processed/             # UNSW_cleaned.csv is generated here by the script
 ├── scripts/
-│   └── analysis_main.R       # Full pipeline: cleaning → EDA → modelling
+│   └── analysis_main.R        # Full pipeline: cleaning -> EDA -> modelling
 ├── plots/
-│   ├── distribution_plot.png # Traffic class balance chart
-│   ├── sload_dload_violin.png# Source/destination load violin plots
-│   └── roc_curve.png         # ROC curve for logistic regression model
+│   ├── distribution_plot.png  # Traffic class balance chart
+│   ├── sload_dload_violin.png # Source/destination load violin plots
+│   └── roc_curve.png          # ROC curve for logistic regression model
 ├── .gitignore
 ├── LICENSE
 └── README.md
@@ -58,20 +58,20 @@ source("scripts/analysis_main.R")
 The script will:
 - Clean and export the full dataset to `data/processed/UNSW_cleaned.csv`
 - Save all EDA plots to `plots/`
-- Print model summaries, confidence intervals, confusion matrix, and AUC to the console
+- Print model summaries, confidence intervals, and confusion matrix to the console
+- Run an automatic overfitting check (train vs test accuracy gap)
 
 ---
 
-## 📊 Results Overview
+## 📊 Results
 
-### Pipeline Summary
+### Dataset Summary (after cleaning)
 
-| Step | Method | Key Outcome |
-|---|---|---|
-| Cleaning | IQR outlier removal + median/mean imputation | Structured, analysis-ready dataset |
-| EDA | Violin plots, bar charts | Clear load differences between Normal and Attack traffic |
-| Inferential | Welch ANOVA + Wilcoxon effect size | Statistically significant difference in source load |
-| Modelling | Logistic Regression (2 models) | Model 2 achieves 88.54% accuracy with Kappa 0.73 |
+| Class | Count | Mean Sload | Median Sload |
+|---|---|---|---|
+| Normal | 42,061 | 24,321,135 | 502,901 |
+| Attack | 95,412 | 94,932,248 | 50,666,664 |
+| **Total** | **137,473** | | |
 
 ---
 
@@ -79,48 +79,51 @@ The script will:
 
 | Metric | Model 1 (ls + ld) | Model 2 (ls + ld + sinpkt + sbytes + dbytes + sttl) |
 |---|---|---|
-| AIC | 6690.3 | **5373.2** |
-| Residual Deviance | 6684.3 | **5359.2** |
+| Training rows | 86,079 | 86,079 |
+| AIC | 68,396 | **53,702** |
+| Residual Deviance | 68,390 | **53,688** |
 | Fisher Scoring Iterations | 5 | 7 |
 
-Model 2 achieves a substantially lower AIC (-1317 points), confirming the additional features meaningfully improve model fit.
+Model 2 achieves an AIC reduction of **14,694 points**, confirming the additional features meaningfully improve model fit.
 
 ---
 
 ### Model 2 — Final Coefficients
 
-All 6 predictors are statistically significant (p < 0.001):
+All 6 predictors statistically significant (p < 0.001):
 
-| Predictor | Estimate | 95% CI | Effect on Attack Probability |
+| Predictor | Estimate | 95% CI | Interpretation |
 |---|---|---|---|
-| Intercept | +5.933 | (5.469, 6.397) | Baseline |
-| ls (log source load) | -0.189 | (-0.214, -0.164) | Higher load → less likely Attack |
-| ld (log dest load) | -0.354 | (-0.381, -0.327) | Higher load → less likely Attack |
-| sinpkt (source inter-packet time) | -0.833 | (-0.948, -0.718) | Faster packets → more likely Attack |
-| sbytes (source bytes) | +2.501 | (1.690, 3.311) | More bytes → more likely Attack |
-| dbytes (dest bytes) | +0.345 | (0.246, 0.444) | More bytes → more likely Attack |
-| sttl (time to live) | +0.723 | (0.630, 0.816) | Higher TTL → more likely Attack |
+| Intercept | +6.023 | (5.879, 6.167) | Baseline log-odds |
+| ls (log source load) | -0.187 | (-0.195, -0.179) | Higher load → less likely Attack |
+| ld (log dest load) | -0.368 | (-0.376, -0.360) | Higher load → less likely Attack |
+| sinpkt (source inter-packet time) | -1.031 | (-1.081, -0.981) | Faster packets → more likely Attack |
+| sbytes (source bytes) | +2.600 | (2.327, 2.873) | More source bytes → more likely Attack |
+| dbytes (dest bytes) | +0.413 | (0.374, 0.451) | More dest bytes → more likely Attack |
+| sttl (time to live) | +0.663 | (0.634, 0.691) | Higher TTL → more likely Attack |
+
+Note: `dinpkt` was removed — non-significant across all runs (p = 0.85, CI crosses zero).
 
 ---
 
-### Model 2 — Confusion Matrix (Test Set)
+### Model 2 — Confusion Matrix (Test Set: 21,521 rows)
 
 ```
               Actual Normal    Actual Attack
-Predicted Normal     531              83
-Predicted Attack     159            1338
+Predicted Normal    4,859          1,037
+Predicted Attack    1,673         13,952
 ```
 
 | Metric | Value |
 |---|---|
-| **Accuracy** | **88.54%** |
-| 95% CI | (87.10%, 89.86%) |
-| Sensitivity | 76.96% |
-| Specificity | 94.16% |
-| Kappa | **0.7319** |
-| Balanced Accuracy | 85.56% |
-| Positive Pred Value | 86.48% |
-| Negative Pred Value | 89.38% |
+| **Accuracy** | **87.41%** |
+| 95% CI | (86.96%, 87.85%) |
+| Sensitivity | 74.39% |
+| Specificity | 93.08% |
+| **Kappa** | **0.6937** |
+| Balanced Accuracy | 83.73% |
+| Positive Pred Value | 82.41% |
+| Negative Pred Value | 89.29% |
 
 ---
 
@@ -128,24 +131,32 @@ Predicted Attack     159            1338
 
 | | Value |
 |---|---|
-| Train Accuracy | 86.56% |
-| Test Accuracy | 86.68% |
-| Gap | -0.0012 |
+| Train Accuracy | 87.57% |
+| Test Accuracy | 87.41% |
+| **Gap** | **+0.0016** |
 
-A near-zero negative gap confirms the model generalises well to unseen data with **no overfitting**.
+A gap of 0.0016 (0.16%) confirms the model generalises well to unseen data with **no overfitting**.
+
+---
+
+### Wilcoxon Effect Size (Sload)
+
+| Comparison | Effect Size | Magnitude |
+|---|---|---|
+| Normal vs Attack | 0.233 | Small |
+
+Despite being statistically small, the Welch ANOVA confirms the difference is highly significant (p = 0, F = 15,127) due to the large sample size.
 
 ---
 
 ### Model Evolution
 
-| Configuration | Accuracy | Kappa |
-|---|---|---|
-| 10% sample, 4 features | 84.77% | — |
-| 100% data, 4 features | 86.68% | 0.6716 |
-| 100% data, 7 features (with dinpkt) | 86.02% | 0.6664 |
-| **100% data, 6 features (dinpkt removed)** | **88.54%** | **0.7319** |
-
-Removing the non-significant `dinpkt` predictor (p = 0.85) improved every metric across the board.
+| Configuration | Sample Size | Rows | Accuracy | Kappa |
+|---|---|---|---|---|
+| 4 features (ls, ld, sinpkt, dinpkt) | 10% | ~13,700 | 84.77% | — |
+| 4 features (ls, ld, sinpkt, dinpkt) | 100% | 137,473 | 86.68% | 0.6716 |
+| 7 features (+ sbytes, dbytes, sttl, dinpkt) | 100% | 137,473 | 86.02% | 0.6664 |
+| **6 features — dinpkt dropped** | **100%** | **137,473** | **87.41%** | **0.6937** |
 
 ---
 
