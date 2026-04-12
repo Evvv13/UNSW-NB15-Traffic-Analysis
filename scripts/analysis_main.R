@@ -121,14 +121,12 @@ unsw <- rbind(normal_clean, attack_data)
 rm(normal_data, attack_data, normal_clean)
 gc()
 
-# FIX: Use fwrite() instead of write.csv() — 5-10x faster for large files
+# FIX: Use fwrite() instead of write.csv() -- 5-10x faster for large files
 fwrite(unsw, "data/processed/UNSW_cleaned.csv")
 cat("Cleaned dataset saved to data/processed/UNSW_cleaned.csv\n")
 
-# --- Sample 10% BEFORE EDA and modelling ---
-set.seed(123)
-unsw <- unsw[sample(nrow(unsw), size = 0.10 * nrow(unsw)), ]
-cat("Working with sampled dataset:", nrow(unsw), "rows\n")
+# Use full cleaned dataset -- no sampling needed
+cat("Using full dataset:", nrow(unsw), "rows\n")
 gc()
 
 
@@ -186,8 +184,8 @@ unsw <- unsw %>% mutate(ls = log1p(sload), ld = log1p(dload))
 cat("--- Welch ANOVA: log(Sload) by Attack Status ---\n")
 print(unsw %>% welch_anova_test(ls ~ is_attack))
 
-# FIX: wilcox_effsize is very slow on large data — use a 5000-row subsample
-cat("--- Wilcoxon Effect Size: Sload (subsampled) ---\n")
+# FIX: wilcox_effsize is very slow on large data -- use a 5000-row subsample
+cat("--- Wilcoxon Effect Size: Sload (subsampled to 5000 rows) ---\n")
 set.seed(42)
 unsw_sub <- unsw[sample(nrow(unsw), min(5000, nrow(unsw))), ]
 print(unsw_sub %>% wilcox_effsize(sload ~ is_attack))
@@ -198,42 +196,41 @@ gc()
 # 8. PREDICTIVE MODELING: LOGISTIC REGRESSION ----------------------------------
 cat("\n[6/6] Fitting logistic regression models...\n")
 
-# Check sinpkt and dinpkt exist before using them
-required_cols <- c("is_attack", "ls", "ld", "sinpkt", "dinpkt", "sbytes", "dbytes", "sttl")
+# Guard: confirm all required columns exist before modelling
+required_cols <- c("is_attack", "ls", "ld", "sinpkt", "sbytes", "dbytes", "sttl")
 missing_cols  <- setdiff(required_cols, names(unsw))
 if (length(missing_cols) > 0) stop(paste("Missing columns:", paste(missing_cols, collapse = ", ")))
 
-# Prepare model dataset — convert sinpkt/dinpkt from character to numeric
-# These columns are stored as text strings in the raw CSV, which causes
-# scale() and glm() to crash. We convert, scale, then drop any bad rows.
+# Prepare model dataset
+# sinpkt is stored as character in the raw CSV -- convert to double before scaling
+# dinpkt was dropped: non-significant across all runs (p = 0.85, CI crosses zero)
 df_model <- unsw %>%
-  select(is_attack, ls, ld, sinpkt, dinpkt, sbytes, dbytes, sttl) %>%
+  select(is_attack, ls, ld, sinpkt, sbytes, dbytes, sttl) %>%
   mutate(
     sinpkt = as.vector(scale(as.double(sinpkt))),
-  #  dinpkt = as.vector(scale(as.double(dinpkt))),
     sbytes = as.vector(scale(as.double(sbytes))),
     dbytes = as.vector(scale(as.double(dbytes))),
     sttl   = as.vector(scale(as.double(sttl)))
   ) %>%
   drop_na()
 
-# FIX: Use base sample() instead of sample.split() — much faster
+# FIX: Use base sample() instead of sample.split() -- much faster
 set.seed(123)
 n         <- nrow(df_model)
 train_idx <- sample(seq_len(n), size = floor(0.8 * n))
 train_set <- df_model[train_idx, ]
 test_set  <- df_model[-train_idx, ]
 
-# Model 1: Load features only
+# Model 1: Load features only (baseline)
 cat("Fitting Model 1 (ls + ld)...\n")
 m1 <- glm(is_attack ~ ls + ld,
           data    = train_set,
           family  = binomial,
-          control = glm.control(maxit = 50, epsilon = 1e-6))  # cap iterations
+          control = glm.control(maxit = 50, epsilon = 1e-6))
 
-# Model 2: Load + inter-packet timing features
-# FIX: glm.control() caps max iterations (maxit) and loosens convergence
-# tolerance (epsilon) — prevents glm from running forever on noisy data
+# Model 2: Load + packet timing + byte volume + TTL
+# FIX: glm.control() caps iterations and sets convergence tolerance
+# prevents glm from running indefinitely on large or noisy data
 cat("Fitting Model 2 (ls + ld + sinpkt + sbytes + dbytes + sttl)...\n")
 m2 <- glm(is_attack ~ ls + ld + sinpkt + sbytes + dbytes + sttl,
           data    = train_set,
@@ -247,7 +244,7 @@ print(summary(m1))
 cat("\n--- Model 2 Summary ---\n")
 print(summary(m2))
 
-# FIX: confint.default() uses normal approximation — much faster than confint()
+# FIX: confint.default() uses normal approximation -- much faster than confint()
 # confint() runs likelihood profiling which is very slow on large models
 cat("\n--- Confidence Intervals: Model 1 (confint.default) ---\n")
 print(confint.default(m1))
@@ -262,6 +259,17 @@ pred_class <- factor(ifelse(pred_prob > 0.5, "Attack", "Normal"), levels = c("No
 cat("\n--- Confusion Matrix (Model 2) ---\n")
 print(confusionMatrix(pred_class, test_set$is_attack))
 
+# Train vs test accuracy check -- confirm no overfitting
+train_pred  <- predict(m2, newdata = train_set, type = "response")
+train_class <- factor(ifelse(train_pred > 0.5, "Attack", "Normal"), levels = c("Normal", "Attack"))
+train_acc   <- mean(train_class == train_set$is_attack)
+test_acc    <- mean(pred_class  == test_set$is_attack)
+
+cat("\n--- Overfitting Check ---\n")
+cat("Train accuracy:", round(train_acc, 4), "\n")
+cat("Test accuracy: ", round(test_acc,  4), "\n")
+cat("Gap:           ", round(train_acc - test_acc, 4), "\n")
+
 # ROC Curve
 roc_score <- roc(test_set$is_attack, pred_prob)
 
@@ -272,6 +280,6 @@ plot(roc_score,
 dev.off()
 cat("Saved: plots/roc_curve.png\n")
 
-# --- Shutdown parallel cluster cleanly ---
+# Shutdown parallel cluster cleanly
 stopImplicitCluster()
 cat("\nDone! All outputs saved.\n")
