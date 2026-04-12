@@ -1,0 +1,3 @@
+This folder stores the cleaned dataset produced by the analysis script.
+
+After running scripts/analysis_main.R, the file 'UNSW_cleaned.csv' will be saved here automatically.
